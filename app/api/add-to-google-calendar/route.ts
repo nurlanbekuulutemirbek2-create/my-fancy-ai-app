@@ -107,8 +107,9 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Google Calendar API error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
     return NextResponse.json(
-      { error: 'Failed to add event to Google Calendar', details: error.message },
+      { error: 'Failed to add event to Google Calendar', details: errorMessage },
       { status: 500 }
     )
   }

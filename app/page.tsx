@@ -275,7 +275,7 @@ export default function HomePage() {
               <p className="text-gray-600 max-w-2xl mx-auto">
                 Click on any of the feature cards above to dive into that specific tool. Each feature opens in its own dedicated page 
                 with a full interface designed for that particular functionality. Navigate back to the dashboard anytime using the 
-                "Back to Dashboard" link in each tool's header.
+                &ldquo;Back to Dashboard&rdquo; link in each tool&apos;s header.
               </p>
               <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
                 <Zap className="w-4 h-4" />

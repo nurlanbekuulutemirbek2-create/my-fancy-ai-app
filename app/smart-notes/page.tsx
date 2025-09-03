@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Plus, Search, Tag, Calendar, Edit3, Trash2, Star, ArrowLeft, Save, FolderOpen, Lightbulb } from 'lucide-react'
+import { FileText, Plus, Search, Calendar, Edit3, Trash2, Star, ArrowLeft, Save, Lightbulb } from 'lucide-react'
 import Link from 'next/link'
 
 interface Note {
@@ -38,29 +38,35 @@ export default function SmartNotesPage() {
     { value: 'tasks', label: 'Tasks', color: 'bg-red-100 text-red-800' }
   ]
 
-  const commonTags = [
-    'important', 'urgent', 'follow-up', 'completed', 'in-progress', 'review', 'draft'
-  ]
+
 
   // Load notes from localStorage on component mount
   useEffect(() => {
     const savedNotes = localStorage.getItem('smart-notes')
-    console.log('Loading saved notes from localStorage:', savedNotes)
     if (savedNotes) {
       try {
-        const parsedNotes = JSON.parse(savedNotes).map((note: any) => ({
-          ...note,
-          createdAt: new Date(note.createdAt),
-          updatedAt: new Date(note.updatedAt)
-        }))
-        console.log('Parsed notes:', parsedNotes)
+        const parsedNotes = JSON.parse(savedNotes).map((note: unknown) => {
+          const noteData = note as { 
+            id: string; 
+            title: string; 
+            content: string; 
+            category: string; 
+            tags: string[]; 
+            isFavorite: boolean;
+            createdAt: string; 
+            updatedAt: string 
+          }
+          return {
+            ...noteData,
+            createdAt: new Date(noteData.createdAt),
+            updatedAt: new Date(noteData.updatedAt)
+          }
+        })
         setNotes(parsedNotes)
       } catch (error) {
         console.error('Error parsing saved notes:', error)
         setNotes([])
       }
-    } else {
-      console.log('No saved notes found in localStorage')
     }
   }, [])
 
@@ -80,12 +86,7 @@ export default function SmartNotesPage() {
       createdAt: new Date(),
       updatedAt: new Date()
     }
-    console.log('Creating new note:', newNote)
-    setNotes(prev => {
-      const newNotes = [newNote, ...prev]
-      console.log('Updated notes array after creation:', newNotes)
-      return newNotes
-    })
+    setNotes(prev => [newNote, ...prev])
     setCurrentNote(newNote)
     setIsEditing(true)
   }
@@ -103,8 +104,7 @@ export default function SmartNotesPage() {
       const newNotes = prev.map(note => 
         note.id === currentNote.id ? updatedNote : note
       )
-      console.log('Saving note:', updatedNote)
-      console.log('Updated notes array:', newNotes)
+      
       return newNotes
     })
     
@@ -224,19 +224,7 @@ export default function SmartNotesPage() {
             </Button>
             
             {/* Debug Button */}
-            <Button
-              onClick={() => {
-                console.log('Current notes state:', notes)
-                console.log('localStorage content:', localStorage.getItem('smart-notes'))
-                console.log('Filtered notes:', filteredNotes)
-                console.log('Sorted notes:', sortedNotes)
-              }}
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
-              Debug Notes
-            </Button>
+
 
             {/* Search and Filters */}
             <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl">
@@ -302,7 +290,6 @@ export default function SmartNotesPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {console.log('Rendering notes:', sortedNotes)}
                   {sortedNotes.map((note) => (
                     <div
                       key={note.id}
@@ -510,7 +497,7 @@ export default function SmartNotesPage() {
                       <span className="font-medium text-blue-900">AI Suggestions</span>
                     </div>
                     <p className="text-sm text-blue-800">
-                      💡 Try adding tags like "important", "follow-up", or "completed" to organize your notes better.
+                      💡 Try adding tags like &ldquo;important&rdquo;, &ldquo;follow-up&rdquo;, or &ldquo;completed&rdquo; to organize your notes better.
                     </p>
                   </div>
                 </CardContent>

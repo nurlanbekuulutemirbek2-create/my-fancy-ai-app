@@ -1,15 +1,12 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { 
   Mic, 
-  MicOff, 
-  Play, 
-  Square, 
   ArrowLeft, 
   Calendar, 
   CheckCircle, 
@@ -17,7 +14,7 @@ import {
   AlertCircle,
   Loader2,
   Plus,
-  X
+  Square
 } from 'lucide-react'
 import Link from 'next/link'
 import { useUser } from '@clerk/nextjs'
@@ -175,12 +172,19 @@ export default function VoiceMagicPage() {
 
       if (!response.ok) {
         const errorData = await response.json()
+        console.error('API Error Response:', errorData)
         throw new Error(errorData.error || 'Failed to extract tasks')
       }
 
       const data = await response.json()
+      console.log('API Success Response:', data)
+      
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Invalid response format from API')
+      }
+      
       setExtractedTasks(data.tasks)
-      setSelectedTasks(new Set(data.tasks.map((_: any, index: number) => index.toString())))
+      setSelectedTasks(new Set(data.tasks.map((_: unknown, index: number) => index.toString())))
 
     } catch (error) {
       console.error('Task extraction error:', error)

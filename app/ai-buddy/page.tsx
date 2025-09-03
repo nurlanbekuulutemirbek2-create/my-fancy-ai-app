@@ -3,10 +3,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Bot, Send, User, ArrowLeft, Sparkles, Lightbulb, MessageCircle, Copy, Download, RefreshCw, Settings, Zap } from 'lucide-react'
+import { Bot, Send, User, ArrowLeft, Lightbulb, MessageCircle, Copy, Download } from 'lucide-react'
 import Link from 'next/link'
 
 interface Message {
@@ -88,15 +88,24 @@ export default function AIBuddyPage() {
   useEffect(() => {
     const savedConversations = localStorage.getItem('ai-buddy-conversations')
     if (savedConversations) {
-      const parsedConversations = JSON.parse(savedConversations).map((conv: any) => ({
-        ...conv,
-        createdAt: new Date(conv.createdAt),
-        updatedAt: new Date(conv.updatedAt),
-        messages: conv.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }))
-      }))
+      const parsedConversations = JSON.parse(savedConversations).map((conv: unknown) => {
+        const conversation = conv as { 
+          id: string; 
+          title: string; 
+          messages: Array<{ id: string; content: string; role: string; timestamp: string; type: string }>;
+          createdAt: string; 
+          updatedAt: string 
+        }
+        return {
+          ...conversation,
+          createdAt: new Date(conversation.createdAt),
+          updatedAt: new Date(conversation.updatedAt),
+          messages: conversation.messages.map((msg) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        }
+      })
       setConversations(parsedConversations)
     }
   }, [])
@@ -168,7 +177,7 @@ export default function AIBuddyPage() {
       }
 
       const data = await response.json()
-      const aiResponse = data.response
+      const aiResponse = data.response || 'Sorry, I encountered an error. Please try again.'
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -591,7 +600,7 @@ export default function AIBuddyPage() {
                   <Bot className="w-16 h-16 text-gray-400 mb-4" />
                   <h3 className="text-xl font-medium text-gray-600 mb-2">Welcome to AI Buddy!</h3>
                   <p className="text-gray-500 text-center mb-6">
-                    Start a new conversation to chat with your AI assistant. I'm here to help with ideas, 
+                    Start a new conversation to chat with your AI assistant. I&apos;m here to help with ideas, 
                     answer questions, and provide creative solutions!
                   </p>
                   <Button onClick={createNewConversation} className="bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white">
