@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +14,8 @@ import {
   AlertCircle,
   Loader2,
   Plus,
-  Square
+  Square,
+  X
 } from 'lucide-react'
 import Link from 'next/link'
 import { useUser } from '@clerk/nextjs'
@@ -55,6 +56,46 @@ export default function VoiceMagicPage() {
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+
+  // Load saved recordings from localStorage on component mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('voice-magic-history')
+    if (savedHistory) {
+      try {
+        const parsedHistory = JSON.parse(savedHistory).map((recording: unknown) => {
+          const recordingData = recording as {
+            id: string;
+            transcription: string;
+            tasks: Array<{
+              title: string;
+              type: string;
+              description: string;
+              date: string;
+              time: string | null;
+              priority: string;
+              category: string;
+            }>;
+            timestamp: string;
+            duration: number;
+            language: string;
+          }
+          return {
+            ...recordingData,
+            timestamp: new Date(recordingData.timestamp)
+          }
+        })
+        setRecordingHistory(parsedHistory)
+      } catch (error) {
+        console.error('Error parsing saved history:', error)
+        setRecordingHistory([])
+      }
+    }
+  }, [])
+
+  // Save recordings to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('voice-magic-history', JSON.stringify(recordingHistory))
+  }, [recordingHistory])
 
   const languages = [
     { value: 'en-US', label: 'English (US)', flag: '🇺🇸' },
@@ -248,8 +289,9 @@ export default function VoiceMagicPage() {
     try {
       const selectedTaskObjects = Array.from(selectedTasks).map(index => extractedTasks[parseInt(index)])
       
-      // Generate calendar links for each task
-      for (const task of selectedTaskObjects) {
+      // Generate calendar links for each task with delay to prevent browser blocking
+      for (let i = 0; i < selectedTaskObjects.length; i++) {
+        const task = selectedTaskObjects[i]
         const response = await fetch('/api/create-calendar-link', {
           method: 'POST',
           headers: {
@@ -261,13 +303,15 @@ export default function VoiceMagicPage() {
         if (response.ok) {
           const data = await response.json()
           
-          // Open Google Calendar in a new tab
-          window.open(data.calendarLinks.google, '_blank')
+          // Add delay between opening tabs to prevent browser blocking
+          setTimeout(() => {
+            window.open(data.calendarLinks.google, '_blank')
+          }, i * 500) // 500ms delay between each tab
         }
       }
 
       // Show success message
-      alert(`${selectedTaskObjects.length} tasks opened in Google Calendar! Check your browser tabs.`)
+      alert(`${selectedTaskObjects.length} tasks will open in Google Calendar! Check your browser tabs.`)
 
     } catch (error) {
       console.error('Google Calendar error:', error)
@@ -285,16 +329,46 @@ export default function VoiceMagicPage() {
     setSelectedTasks(newSelected)
   }
 
-  const formatDate = (dateStr: string) => {
+    const formatDate = (dateStr: string) => {
     if (dateStr === 'today') return 'Today'
     if (dateStr === 'tomorrow') return 'Tomorrow'
     
     try {
       const date = new Date(dateStr)
       return date.toLocaleDateString()
-    } catch {
+      } catch {
       return dateStr
     }
+  }
+
+  const saveCurrentRecording = () => {
+    if (!transcription || extractedTasks.length === 0) return
+
+    const newRecording: RecordingHistory = {
+      id: Date.now().toString(),
+      transcription,
+      tasks: extractedTasks,
+      timestamp: new Date(),
+      duration: recordingBlob ? Math.round(recordingBlob.size / 1000) : 0,
+      language
+    }
+
+    setRecordingHistory(prev => [newRecording, ...prev])
+    
+    // Save to localStorage
+    const updatedHistory = [newRecording, ...recordingHistory]
+    localStorage.setItem('voice-magic-history', JSON.stringify(updatedHistory))
+    
+    alert('Recording saved to history!')
+  }
+
+  const clearCurrentRecording = () => {
+    setTranscription('')
+    setExtractedTasks([])
+    setSelectedTasks(new Set())
+    setRecordingBlob(null)
+    setAudioUrl(null)
+    setError('')
   }
 
   return (
@@ -436,6 +510,25 @@ export default function VoiceMagicPage() {
                 <CardContent>
                   <div className="p-4 bg-gray-50 rounded-lg">
                     <p className="text-gray-900 whitespace-pre-wrap">{transcription}</p>
+                  </div>
+                  
+                  {/* Action Buttons */}
+                  <div className="flex space-x-2 mt-4">
+                    <Button
+                      onClick={saveCurrentRecording}
+                      className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Save Recording
+                    </Button>
+                    <Button
+                      onClick={clearCurrentRecording}
+                      variant="outline"
+                      className="flex-1 border-red-300 text-red-600 hover:bg-red-50"
+                    >
+                      <X className="w-4 h-4 mr-2" />
+                      Clear
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
