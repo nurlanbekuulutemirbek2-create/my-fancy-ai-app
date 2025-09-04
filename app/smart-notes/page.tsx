@@ -291,22 +291,46 @@ export default function SmartNotesPage() {
         language: language
       })
 
+      // First, test if the API endpoint is reachable
+      try {
+        const testResponse = await fetch('/api/transcribe-voice', {
+          method: 'HEAD'
+        })
+        console.log('API endpoint test response:', testResponse.status)
+      } catch (testError) {
+        console.error('API endpoint test failed:', testError)
+        throw new Error('API endpoint not reachable. Please check if the server is running.')
+      }
+
       const response = await fetch('/api/transcribe-voice', {
         method: 'POST',
         body: formData
       })
 
       console.log('Transcription response status:', response.status)
+      console.log('Transcription response headers:', Object.fromEntries(response.headers.entries()))
 
       if (!response.ok) {
         let errorMessage = 'Failed to transcribe audio'
+        let errorDetails = {}
+        
         try {
           const errorData = await response.json()
           errorMessage = errorData.error || errorMessage
+          errorDetails = errorData
           console.error('API Error details:', errorData)
         } catch (parseError) {
           console.error('Failed to parse error response:', parseError)
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`
         }
+        
+        console.error('Full error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+          errorDetails: errorDetails
+        })
+        
         throw new Error(errorMessage)
       }
 
@@ -327,6 +351,8 @@ export default function SmartNotesPage() {
       // Show more specific error information
       if (errorMessage.includes('Failed to fetch')) {
         setError('Network error: Please check your internet connection')
+      } else if (errorMessage.includes('API endpoint not reachable')) {
+        setError('Server error: API endpoint not accessible')
       } else if (errorMessage.includes('No transcription received')) {
         setError('API returned empty response. Please try again.')
       } else {
@@ -498,17 +524,61 @@ export default function SmartNotesPage() {
                     </Button>
                     
                     {/* Fallback for testing */}
-                    <Button
-                      onClick={() => {
-                        setTranscription('This is a test transcription. Please check your API configuration and try the real transcription.')
-                        setError('')
-                      }}
-                      variant="outline"
-                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50"
-                    >
-                      <AlertCircle className="w-4 h-4 mr-2" />
-                      Test Transcription (Debug)
-                    </Button>
+                    <div className="space-y-2">
+                      <Button
+                        onClick={() => {
+                          setTranscription('This is a test transcription. Please check your API configuration and try the real transcription.')
+                          setError('')
+                        }}
+                        variant="outline"
+                        className="w-full border-orange-300 text-orange-600 hover:bg-orange-50"
+                      >
+                        <AlertCircle className="w-4 h-4 mr-2" />
+                        Test Transcription (Debug)
+                      </Button>
+                      
+                      <Button
+                        onClick={async () => {
+                          try {
+                            const response = await fetch('/api/transcribe-voice', { method: 'HEAD' })
+                            if (response.ok) {
+                              setError('✅ API endpoint is reachable')
+                            } else {
+                              setError(`❌ API endpoint error: ${response.status}`)
+                            }
+                          } catch (error) {
+                            setError(`❌ API endpoint failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+                          }
+                        }}
+                        variant="outline"
+                        className="w-full border-blue-300 text-blue-600 hover:bg-blue-50"
+                      >
+                        <AlertCircle className="w-4 h-4 mr-2" />
+                        Test API Endpoint
+                      </Button>
+                      
+                      <Button
+                        onClick={async () => {
+                          try {
+                            const response = await fetch('/api/test-env')
+                            const data = await response.json()
+                            console.log('Environment check:', data)
+                            if (data.environment.hasOpenAIKey) {
+                              setError(`✅ OpenAI API key found (${data.environment.openAIKeyLength} chars)`)
+                            } else {
+                              setError('❌ OpenAI API key not found. Check your .env.local file.')
+                            }
+                          } catch (error) {
+                            setError(`❌ Environment check failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+                          }
+                        }}
+                        variant="outline"
+                        className="w-full border-purple-300 text-purple-600 hover:bg-purple-50"
+                      >
+                        <AlertCircle className="w-4 h-4 mr-2" />
+                        Check Environment
+                      </Button>
+                    </div>
                   </div>
                 )}
 
