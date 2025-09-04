@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Bot, Send, User, ArrowLeft, Lightbulb, MessageCircle, Copy, Download } from 'lucide-react'
+import { Bot, Send, User, ArrowLeft, Lightbulb, MessageCircle, Copy, Download, Mic, MicOff, Square, Calendar, Clock, CheckCircle, Plus, Loader2, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 
 interface Message {
@@ -25,6 +25,25 @@ interface Conversation {
   updatedAt: Date
 }
 
+interface ExtractedTask {
+  title: string
+  type: 'task' | 'event'
+  description: string
+  date: string
+  time: string | null
+  priority: 'low' | 'medium' | 'high'
+  category: string
+}
+
+interface VoiceNote {
+  id: string
+  transcription: string
+  tasks: ExtractedTask[]
+  timestamp: Date
+  duration: number
+  language: string
+}
+
 export default function AIBuddyPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
@@ -33,6 +52,22 @@ export default function AIBuddyPage() {
   const [selectedPersonality, setSelectedPersonality] = useState('friendly-mentor')
   const [selectedTopic, setSelectedTopic] = useState('general-chat')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Voice recording states
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [isExtractingTasks, setIsExtractingTasks] = useState(false)
+  const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [transcription, setTranscription] = useState('')
+  const [extractedTasks, setExtractedTasks] = useState<ExtractedTask[]>([])
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
+  const [voiceNotes, setVoiceNotes] = useState<VoiceNote[]>([])
+  const [error, setError] = useState('')
+  const [language, setLanguage] = useState('en-US')
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   const personalities = [
     { 
@@ -75,6 +110,34 @@ export default function AIBuddyPage() {
     { value: 'planning', label: 'Planning & Strategy' }
   ]
 
+  const languages = [
+    { value: 'en-US', label: 'English (US)', flag: '🇺🇸' },
+    { value: 'en-GB', label: 'English (UK)', flag: '🇬🇧' },
+    { value: 'es-ES', label: 'Spanish', flag: '🇪🇸' },
+    { value: 'fr-FR', label: 'French', flag: '🇫🇷' },
+    { value: 'de-DE', label: 'German', flag: '🇩🇪' },
+    { value: 'it-IT', label: 'Italian', flag: '🇮🇹' },
+    { value: 'pt-BR', label: 'Portuguese', flag: '🇧🇷' },
+    { value: 'ja-JP', label: 'Japanese', flag: '🇯🇵' },
+    { value: 'ko-KR', label: 'Korean', flag: '🇰🇷' },
+    { value: 'zh-CN', label: 'Chinese', flag: '🇨🇳' }
+  ]
+
+  const priorityColors = {
+    low: 'bg-green-100 text-green-800',
+    medium: 'bg-yellow-100 text-yellow-800',
+    high: 'bg-red-100 text-red-800'
+  }
+
+  const categoryColors = {
+    work: 'bg-blue-100 text-blue-800',
+    personal: 'bg-purple-100 text-purple-800',
+    health: 'bg-green-100 text-green-800',
+    shopping: 'bg-orange-100 text-orange-800',
+    travel: 'bg-indigo-100 text-indigo-800',
+    other: 'bg-gray-100 text-gray-800'
+  }
+
   const quickPrompts = [
     "Help me brainstorm ideas for a project",
     "Explain a complex concept in simple terms",
@@ -108,7 +171,45 @@ export default function AIBuddyPage() {
       })
       setConversations(parsedConversations)
     }
+
+    // Load saved voice notes from localStorage
+    const savedVoiceNotes = localStorage.getItem('ai-buddy-voice-notes')
+    if (savedVoiceNotes) {
+      try {
+        const parsedVoiceNotes = JSON.parse(savedVoiceNotes).map((note: unknown) => {
+          const voiceNote = note as {
+            id: string;
+            transcription: string;
+            tasks: Array<{
+              title: string;
+              type: string;
+              description: string;
+              date: string;
+              time: string | null;
+              priority: string;
+              category: string;
+            }>;
+            timestamp: string;
+            duration: number;
+            language: string;
+          }
+          return {
+            ...voiceNote,
+            timestamp: new Date(voiceNote.timestamp)
+          }
+        })
+        setVoiceNotes(parsedVoiceNotes)
+      } catch (error) {
+        console.error('Error parsing saved voice notes:', error)
+        setVoiceNotes([])
+      }
+    }
   }, [])
+
+  // Save voice notes to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('ai-buddy-voice-notes', JSON.stringify(voiceNotes))
+  }, [voiceNotes])
 
   // Save conversations to localStorage whenever they change
   useEffect(() => {
@@ -307,6 +408,165 @@ export default function AIBuddyPage() {
     setInputMessage(prompt)
   }
 
+  // Voice recording functions
+  const startRecording = async () => {
+    try {
+      setError('')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      })
+      
+      audioChunksRef.current = []
+      
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data)
+      }
+      
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        setRecordingBlob(audioBlob)
+        setAudioUrl(URL.createObjectURL(audioBlob))
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop())
+      }
+      
+      mediaRecorderRef.current.start()
+      setIsRecording(true)
+      
+    } catch (error) {
+      console.error('Error starting recording:', error)
+      setError('Failed to start recording. Please check microphone permissions.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const transcribeAudio = async () => {
+    if (!recordingBlob) return
+
+    setIsTranscribing(true)
+    setError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('audio', recordingBlob)
+      formData.append('language', language)
+
+      const response = await fetch('/api/transcribe-voice', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to transcribe audio')
+      }
+
+      const data = await response.json()
+      setTranscription(data.transcription)
+
+      // Automatically extract tasks after transcription
+      await extractTasks(data.transcription)
+
+    } catch (error) {
+      console.error('Transcription error:', error)
+      setError(error instanceof Error ? error.message : 'Failed to transcribe audio')
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  const extractTasks = async (text: string) => {
+    setIsExtractingTasks(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/extract-tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transcription: text })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error('API Error Response:', errorData)
+        throw new Error(errorData.error || 'Failed to extract tasks')
+      }
+
+      const data = await response.json()
+      console.log('API Success Response:', data)
+      
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Invalid response format from API')
+      }
+      
+      setExtractedTasks(data.tasks)
+      setSelectedTasks(new Set(data.tasks.map((_: unknown, index: number) => index.toString())))
+
+    } catch (error) {
+      console.error('Task extraction error:', error)
+      setError(error instanceof Error ? error.message : 'Failed to extract tasks')
+    } finally {
+      setIsExtractingTasks(false)
+    }
+  }
+
+  const saveVoiceNote = () => {
+    if (!transcription || extractedTasks.length === 0) return
+
+    const newVoiceNote: VoiceNote = {
+      id: Date.now().toString(),
+      transcription,
+      tasks: extractedTasks,
+      timestamp: new Date(),
+      duration: recordingBlob ? Math.round(recordingBlob.size / 1000) : 0,
+      language
+    }
+
+    setVoiceNotes(prev => [newVoiceNote, ...prev])
+    
+    // Reset states
+    setTranscription('')
+    setExtractedTasks([])
+    setSelectedTasks(new Set())
+    setRecordingBlob(null)
+    setAudioUrl(null)
+
+    alert('Voice note saved successfully!')
+  }
+
+  const toggleTaskSelection = (index: string) => {
+    const newSelected = new Set(selectedTasks)
+    if (newSelected.has(index)) {
+      newSelected.delete(index)
+    } else {
+      newSelected.add(index)
+    }
+    setSelectedTasks(newSelected)
+  }
+
+  const formatDate = (dateStr: string) => {
+    if (dateStr === 'today') return 'Today'
+    if (dateStr === 'tomorrow') return 'Tomorrow'
+    
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleDateString()
+    } catch {
+      return dateStr
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-amber-50">
       {/* Header */}
@@ -423,6 +683,100 @@ export default function AIBuddyPage() {
                       {prompt}
                     </Button>
                   ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Voice Recording Section */}
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2 text-gray-900">
+                  <Mic className="w-5 h-5 text-orange-600" />
+                  <span>Voice Notes</span>
+                </CardTitle>
+                <CardDescription className="text-gray-600">
+                  Record and extract tasks from voice
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Language Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Language</label>
+                  <Select value={language} onValueChange={setLanguage}>
+                    <SelectTrigger className="text-gray-900 bg-white border-gray-300 focus:border-orange-500 focus:ring-orange-500">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-gray-200">
+                      {languages.map((lang) => (
+                        <SelectItem key={lang.value} value={lang.value} className="text-gray-900 hover:bg-gray-100">
+                          <div className="flex items-center space-x-2">
+                            <span>{lang.flag}</span>
+                            <span>{lang.label}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Recording Controls */}
+                <div className="space-y-3">
+                  {!isRecording ? (
+                    <Button
+                      onClick={startRecording}
+                      className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white"
+                    >
+                      <Mic className="w-4 h-4 mr-2" />
+                      Start Recording
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={stopRecording}
+                      className="w-full bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      <Square className="w-4 h-4 mr-2" />
+                      Stop Recording
+                    </Button>
+                  )}
+
+                  {/* Audio Player */}
+                  {audioUrl && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">Your Recording</label>
+                      <audio controls className="w-full" src={audioUrl} />
+                    </div>
+                  )}
+
+                  {/* Transcribe Button */}
+                  {recordingBlob && (
+                    <Button
+                      onClick={transcribeAudio}
+                      disabled={isTranscribing}
+                      className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white"
+                    >
+                      {isTranscribing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Transcribing...
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="w-4 h-4 mr-2" />
+                          Transcribe & Extract Tasks
+                        </>
+                      )}
+                    </Button>
+                  )}
+
+                  {/* Error Display */}
+                  {error && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                      <div className="flex items-center space-x-2">
+                        <AlertCircle className="w-4 h-4 text-red-600" />
+                        <p className="text-sm text-red-600">{error}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -609,6 +963,158 @@ export default function AIBuddyPage() {
                   </Button>
                 </CardContent>
               </Card>
+            )}
+
+            {/* Voice Notes Display */}
+            {(transcription || extractedTasks.length > 0 || voiceNotes.length > 0) && (
+              <div className="mt-8">
+                <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2 text-gray-900">
+                      <Mic className="w-5 h-5 text-orange-600" />
+                      <span>Voice Notes & Tasks</span>
+                    </CardTitle>
+                    <CardDescription className="text-gray-600">
+                      Your recorded voice notes and extracted tasks
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Current Recording Results */}
+                    {(transcription || extractedTasks.length > 0) && (
+                      <div className="space-y-4">
+                        <h4 className="font-medium text-gray-900">Current Recording</h4>
+                        
+                        {/* Transcription */}
+                        {transcription && (
+                          <div className="p-4 bg-blue-50 rounded-lg">
+                            <h5 className="font-medium text-blue-900 mb-2">Transcription</h5>
+                            <p className="text-blue-800">{transcription}</p>
+                          </div>
+                        )}
+
+                        {/* Extracted Tasks */}
+                        {extractedTasks.length > 0 && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h5 className="font-medium text-gray-900">Extracted Tasks</h5>
+                              <Button
+                                onClick={saveVoiceNote}
+                                className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
+                              >
+                                <Plus className="w-4 h-4 mr-2" />
+                                Save Voice Note
+                              </Button>
+                            </div>
+                            
+                            <div className="grid gap-3">
+                              {extractedTasks.map((task, index) => (
+                                <div
+                                  key={index}
+                                  className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 ${
+                                    selectedTasks.has(index.toString())
+                                      ? 'border-orange-500 bg-orange-50'
+                                      : 'border-gray-200 bg-white hover:border-gray-300'
+                                  }`}
+                                  onClick={() => toggleTaskSelection(index.toString())}
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                      <div className="flex items-center space-x-2 mb-2">
+                                        <h6 className="font-medium text-gray-900">{task.title}</h6>
+                                        <span className={`px-2 py-1 text-xs rounded-full ${priorityColors[task.priority as keyof typeof priorityColors] || priorityColors.medium}`}>
+                                          {task.priority}
+                                        </span>
+                                        <span className={`px-2 py-1 text-xs rounded-full ${categoryColors[task.category as keyof typeof categoryColors] || categoryColors.other}`}>
+                                          {task.category}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                                      <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                        <div className="flex items-center space-x-1">
+                                          <Calendar className="w-3 h-3" />
+                                          <span>{formatDate(task.date)}</span>
+                                        </div>
+                                        {task.time && (
+                                          <div className="flex items-center space-x-1">
+                                            <Clock className="w-3 h-3" />
+                                            <span>{task.time}</span>
+                                          </div>
+                                        )}
+                                        <div className="flex items-center space-x-1">
+                                          <CheckCircle className="w-3 h-3" />
+                                          <span>{task.type}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className={`ml-4 p-2 rounded-full ${
+                                      selectedTasks.has(index.toString())
+                                        ? 'bg-orange-500 text-white'
+                                        : 'bg-gray-200 text-gray-600'
+                                    }`}>
+                                      {selectedTasks.has(index.toString()) ? (
+                                        <CheckCircle className="w-4 h-4" />
+                                      ) : (
+                                        <Plus className="w-4 h-4" />
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Saved Voice Notes */}
+                    {voiceNotes.length > 0 && (
+                      <div className="space-y-4">
+                        <h4 className="font-medium text-gray-900">Saved Voice Notes</h4>
+                        <div className="space-y-3">
+                          {voiceNotes.map((note) => (
+                            <div key={note.id} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center space-x-2">
+                                  <Mic className="w-4 h-4 text-gray-500" />
+                                  <span className="text-sm text-gray-500">
+                                    {note.timestamp.toLocaleDateString()} • {note.duration}s
+                                  </span>
+                                </div>
+                                <span className="text-xs text-gray-500">{note.language}</span>
+                              </div>
+                              
+                              <div className="mb-3">
+                                <h6 className="font-medium text-gray-900 mb-1">Transcription</h6>
+                                <p className="text-sm text-gray-600">{note.transcription}</p>
+                              </div>
+                              
+                              <div>
+                                <h6 className="font-medium text-gray-900 mb-2">Tasks ({note.tasks.length})</h6>
+                                <div className="grid gap-2">
+                                  {note.tasks.map((task, index) => (
+                                    <div key={index} className="p-3 bg-white rounded border border-gray-200">
+                                      <div className="flex items-center space-x-2 mb-1">
+                                        <span className="font-medium text-sm text-gray-900">{task.title}</span>
+                                        <span className={`px-2 py-1 text-xs rounded-full ${priorityColors[task.priority as keyof typeof priorityColors] || priorityColors.medium}`}>
+                                          {task.priority}
+                                        </span>
+                                        <span className={`px-2 py-1 text-xs rounded-full ${categoryColors[task.category as keyof typeof categoryColors] || categoryColors.other}`}>
+                                          {task.category}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-gray-600">{task.description}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             )}
           </div>
         </div>
