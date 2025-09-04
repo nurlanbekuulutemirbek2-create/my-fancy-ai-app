@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Plus, Search, Calendar, Edit3, Trash2, Star, ArrowLeft, Save, Lightbulb } from 'lucide-react'
+import { FileText, Plus, Search, Calendar, Edit3, Trash2, Star, ArrowLeft, Save, Lightbulb, Mic, MicOff, Square, Loader2, AlertCircle, X } from 'lucide-react'
 import Link from 'next/link'
 
 interface Note {
@@ -29,6 +29,18 @@ export default function SmartNotesPage() {
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
 
+  // Voice recording states
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [transcription, setTranscription] = useState('')
+  const [error, setError] = useState('')
+  const [language, setLanguage] = useState('en-US')
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+
   const categories = [
     { value: 'all', label: 'All Notes', color: 'bg-gray-100 text-gray-800' },
     { value: 'work', label: 'Work', color: 'bg-blue-100 text-blue-800' },
@@ -36,6 +48,19 @@ export default function SmartNotesPage() {
     { value: 'ideas', label: 'Ideas', color: 'bg-purple-100 text-purple-800' },
     { value: 'meetings', label: 'Meetings', color: 'bg-orange-100 text-orange-800' },
     { value: 'tasks', label: 'Tasks', color: 'bg-red-100 text-red-800' }
+  ]
+
+  const languages = [
+    { value: 'en-US', label: 'English (US)', flag: '🇺🇸' },
+    { value: 'en-GB', label: 'English (UK)', flag: '🇬🇧' },
+    { value: 'es-ES', label: 'Spanish', flag: '🇪🇸' },
+    { value: 'fr-FR', label: 'French', flag: '🇫🇷' },
+    { value: 'de-DE', label: 'German', flag: '🇩🇪' },
+    { value: 'it-IT', label: 'Italian', flag: '🇮🇹' },
+    { value: 'pt-BR', label: 'Portuguese', flag: '🇧🇷' },
+    { value: 'ja-JP', label: 'Japanese', flag: '🇯🇵' },
+    { value: 'ko-KR', label: 'Korean', flag: '🇰🇷' },
+    { value: 'zh-CN', label: 'Chinese', flag: '🇨🇳' }
   ]
 
 
@@ -181,6 +206,111 @@ export default function SmartNotesPage() {
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   })
 
+  // Voice recording functions
+  const startRecording = async () => {
+    try {
+      setError('')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      })
+      
+      audioChunksRef.current = []
+      
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data)
+      }
+      
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        setRecordingBlob(audioBlob)
+        setAudioUrl(URL.createObjectURL(audioBlob))
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop())
+      }
+      
+      mediaRecorderRef.current.start()
+      setIsRecording(true)
+      
+    } catch (error) {
+      console.error('Error starting recording:', error)
+      setError('Failed to start recording. Please check microphone permissions.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const transcribeAudio = async () => {
+    if (!recordingBlob) return
+
+    setIsTranscribing(true)
+    setError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('audio', recordingBlob)
+      formData.append('language', language)
+
+      const response = await fetch('/api/transcribe-voice', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to transcribe audio')
+      }
+
+      const data = await response.json()
+      setTranscription(data.transcription)
+
+    } catch (error) {
+      console.error('Transcription error:', error)
+      setError(error instanceof Error ? error.message : 'Failed to transcribe audio')
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  const createNoteFromTranscription = () => {
+    if (!transcription.trim()) return
+
+    const newNote: Note = {
+      id: Date.now().toString(),
+      title: transcription.split(' ').slice(0, 5).join(' ') + '...',
+      content: transcription,
+      category: 'personal',
+      tags: ['voice-note'],
+      isFavorite: false,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+
+    setNotes(prev => [newNote, ...prev])
+    setCurrentNote(newNote)
+    setIsEditing(true)
+    
+    // Clear recording states
+    setTranscription('')
+    setRecordingBlob(null)
+    setAudioUrl(null)
+    setError('')
+  }
+
+  const clearRecording = () => {
+    setTranscription('')
+    setRecordingBlob(null)
+    setAudioUrl(null)
+    setError('')
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50">
       {/* Header */}
@@ -222,9 +352,133 @@ export default function SmartNotesPage() {
               <Plus className="w-5 h-5 mr-2" />
               Create New Note
             </Button>
-            
-            {/* Debug Button */}
 
+            {/* Voice Recording Section */}
+            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2 text-gray-900">
+                  <Mic className="w-5 h-5 text-green-600" />
+                  <span>Voice Notes</span>
+                </CardTitle>
+                <CardDescription className="text-gray-600">
+                  Record and transcribe your voice
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Language Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Language</label>
+                  <Select value={language} onValueChange={setLanguage}>
+                    <SelectTrigger className="text-gray-900 bg-white border-gray-300 focus:border-green-500 focus:ring-green-500">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-gray-200">
+                      {languages.map((lang) => (
+                        <SelectItem key={lang.value} value={lang.value} className="text-gray-900 hover:bg-gray-100">
+                          <div className="flex items-center space-x-2">
+                            <span>{lang.flag}</span>
+                            <span>{lang.label}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Recording Controls */}
+                <div className="flex flex-col items-center space-y-3">
+                  {!isRecording ? (
+                    <Button
+                      onClick={startRecording}
+                      size="lg"
+                      className="w-24 h-24 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white shadow-lg"
+                    >
+                      <Mic className="w-8 h-8" />
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={stopRecording}
+                      size="lg"
+                      className="w-24 h-24 rounded-full bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white shadow-lg animate-pulse"
+                    >
+                      <Square className="w-8 h-8" />
+                    </Button>
+                  )}
+                  
+                  <p className="text-sm text-gray-600 text-center">
+                    {isRecording ? 'Click to stop recording' : 'Click to start recording'}
+                  </p>
+                </div>
+
+                {/* Audio Playback */}
+                {audioUrl && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Your Recording</label>
+                    <audio controls className="w-full" src={audioUrl} />
+                  </div>
+                )}
+
+                {/* Transcribe Button */}
+                {recordingBlob && (
+                  <Button
+                    onClick={transcribeAudio}
+                    disabled={isTranscribing}
+                    className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white"
+                  >
+                    {isTranscribing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Transcribing...
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-4 h-4 mr-2" />
+                        Transcribe Audio
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                {/* Transcription Display */}
+                {transcription && (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-blue-50 rounded-lg">
+                      <h6 className="font-medium text-blue-900 mb-2">Transcription</h6>
+                      <p className="text-sm text-blue-800">{transcription}</p>
+                    </div>
+                    
+                    {/* Action Buttons */}
+                    <div className="flex space-x-2">
+                      <Button
+                        onClick={createNoteFromTranscription}
+                        className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Save as Note
+                      </Button>
+                      <Button
+                        onClick={clearRecording}
+                        variant="outline"
+                        className="flex-1 border-red-300 text-red-600 hover:bg-red-50"
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Error Display */}
+                {error && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                    <div className="flex items-center space-x-2">
+                      <AlertCircle className="w-4 h-4 text-red-600" />
+                      <p className="text-sm text-red-600">{error}</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Search and Filters */}
             <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl">
@@ -302,9 +556,19 @@ export default function SmartNotesPage() {
                       }`}
                     >
                       <div className="flex items-start justify-between mb-2">
-                        <h4 className="font-medium text-gray-900 truncate flex-1">
-                          {note.title}
-                        </h4>
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <h4 className="font-medium text-gray-900 truncate">
+                              {note.title}
+                            </h4>
+                            {note.tags.includes('voice-note') && (
+                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 border border-blue-300">
+                                <Mic className="w-3 h-3 mr-1" />
+                                Voice
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
                         <div className="flex items-center space-x-1">
                           <button
                             onClick={(e) => {
