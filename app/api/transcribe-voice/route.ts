@@ -51,6 +51,8 @@ export async function POST(request: NextRequest) {
       whisperFormData.append('language', langCode)
     }
 
+    console.log('Sending request to OpenAI Whisper API...')
+    
     // Call OpenAI Whisper API
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -59,12 +61,39 @@ export async function POST(request: NextRequest) {
       },
       body: whisperFormData
     })
+    
+    console.log('OpenAI API response:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
+    })
 
     if (!response.ok) {
-      const errorData = await response.json()
-      console.error('OpenAI Whisper API error:', errorData)
+      let errorData: Record<string, unknown> = {}
+      let errorMessage = 'Failed to transcribe audio'
+      
+      try {
+        errorData = await response.json()
+        console.error('OpenAI Whisper API error:', errorData)
+        
+        // Extract the actual error message from OpenAI response
+        if (errorData.error && typeof errorData.error === 'object' && 'message' in errorData.error) {
+          errorMessage = String(errorData.error.message)
+        } else if (errorData.error) {
+          errorMessage = String(errorData.error)
+        }
+      } catch (parseError) {
+        console.error('Failed to parse OpenAI error response:', parseError)
+        errorMessage = `HTTP ${response.status}: ${response.statusText}`
+      }
+      
       return NextResponse.json(
-        { error: 'Failed to transcribe audio', details: errorData },
+        { 
+          error: errorMessage,
+          details: errorData,
+          status: response.status,
+          statusText: response.statusText
+        },
         { status: response.status }
       )
     }
@@ -78,8 +107,18 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Transcription error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: errorMessage,
+        details: { 
+          type: 'internal_error',
+          message: errorMessage,
+          stack: error instanceof Error ? error.stack : undefined
+        },
+        status: 500,
+        statusText: 'Internal Server Error'
+      },
       { status: 500 }
     )
   }

@@ -408,11 +408,11 @@ export default function SmartNotesPage() {
           const errorData = await response.json()
           console.error('Raw API Error response:', errorData)
           
-          // Extract error message from OpenAI API response
-          if (errorData.error && errorData.error.message) {
-            errorMessage = errorData.error.message
-          } else if (errorData.error) {
+          // Extract error message from our improved API response
+          if (errorData.error) {
             errorMessage = errorData.error
+          } else if (errorData.details && errorData.details.message) {
+            errorMessage = errorData.details.message
           } else if (typeof errorData === 'string') {
             errorMessage = errorData
           } else {
@@ -421,6 +421,11 @@ export default function SmartNotesPage() {
           
           errorDetails = errorData
           console.error('Processed API Error details:', errorDetails)
+          
+          // Show more specific error information
+          if (errorData.details && errorData.details.type === 'internal_error') {
+            console.error('Internal server error details:', errorData.details)
+          }
         } catch (parseError) {
           console.error('Failed to parse error response:', parseError)
           errorMessage = `HTTP ${response.status}: ${response.statusText}`
