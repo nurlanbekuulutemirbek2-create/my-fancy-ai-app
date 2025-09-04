@@ -212,8 +212,27 @@ export default function SmartNotesPage() {
       setError('')
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       
+      // Try to use a more compatible audio format
+      let mimeType = 'audio/webm;codecs=opus'
+      
+      // Check if the browser supports the preferred format
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        // Fallback to more compatible formats
+        if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm'
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4'
+        } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+          mimeType = 'audio/wav'
+        } else {
+          mimeType = '' // Let the browser choose the best format
+        }
+      }
+      
+      console.log('Using audio format:', mimeType)
+      
       mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: mimeType || undefined
       })
       
       audioChunksRef.current = []
@@ -223,9 +242,17 @@ export default function SmartNotesPage() {
       }
       
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        const audioBlob = new Blob(audioChunksRef.current, { 
+          type: mimeType || 'audio/webm' 
+        })
         setRecordingBlob(audioBlob)
         setAudioUrl(URL.createObjectURL(audioBlob))
+        
+        console.log('Recording completed:', {
+          size: audioBlob.size,
+          type: audioBlob.type,
+          duration: audioChunksRef.current.length
+        })
         
         // Stop all tracks
         stream.getTracks().forEach(track => track.stop())
@@ -258,22 +285,53 @@ export default function SmartNotesPage() {
       formData.append('audio', recordingBlob)
       formData.append('language', language)
 
+      console.log('Sending transcription request:', {
+        audioSize: recordingBlob.size,
+        audioType: recordingBlob.type,
+        language: language
+      })
+
       const response = await fetch('/api/transcribe-voice', {
         method: 'POST',
         body: formData
       })
 
+      console.log('Transcription response status:', response.status)
+
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to transcribe audio')
+        let errorMessage = 'Failed to transcribe audio'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorMessage
+          console.error('API Error details:', errorData)
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError)
+        }
+        throw new Error(errorMessage)
       }
 
       const data = await response.json()
+      console.log('Transcription success:', data)
+      
+      if (!data.transcription) {
+        throw new Error('No transcription received from API')
+      }
+
       setTranscription(data.transcription)
 
     } catch (error) {
       console.error('Transcription error:', error)
-      setError(error instanceof Error ? error.message : 'Failed to transcribe audio')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to transcribe audio'
+      setError(errorMessage)
+      
+      // Show more specific error information
+      if (errorMessage.includes('Failed to fetch')) {
+        setError('Network error: Please check your internet connection')
+      } else if (errorMessage.includes('No transcription received')) {
+        setError('API returned empty response. Please try again.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setIsTranscribing(false)
     }
@@ -420,23 +478,38 @@ export default function SmartNotesPage() {
 
                 {/* Transcribe Button */}
                 {recordingBlob && (
-                  <Button
-                    onClick={transcribeAudio}
-                    disabled={isTranscribing}
-                    className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white"
-                  >
-                    {isTranscribing ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Transcribing...
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="w-4 h-4 mr-2" />
-                        Transcribe Audio
-                      </>
-                    )}
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      onClick={transcribeAudio}
+                      disabled={isTranscribing}
+                      className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white"
+                    >
+                      {isTranscribing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Transcribing...
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="w-4 h-4 mr-2" />
+                          Transcribe Audio
+                        </>
+                      )}
+                    </Button>
+                    
+                    {/* Fallback for testing */}
+                    <Button
+                      onClick={() => {
+                        setTranscription('This is a test transcription. Please check your API configuration and try the real transcription.')
+                        setError('')
+                      }}
+                      variant="outline"
+                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50"
+                    >
+                      <AlertCircle className="w-4 h-4 mr-2" />
+                      Test Transcription (Debug)
+                    </Button>
+                  </div>
                 )}
 
                 {/* Transcription Display */}

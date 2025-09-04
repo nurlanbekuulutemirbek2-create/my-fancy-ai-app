@@ -2,8 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('Transcription request received')
+    
     const formData = await request.formData()
     const audioFile = formData.get('audio') as File
+    const language = formData.get('language') as string | null
+
+    console.log('Request data:', {
+      hasAudioFile: !!audioFile,
+      audioFileSize: audioFile?.size,
+      audioFileType: audioFile?.type,
+      language: language
+    })
 
     if (!audioFile) {
       return NextResponse.json(
@@ -13,17 +23,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Get OpenAI API key from environment
-    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY
+    const apiKey = process.env.OPENAI_API_KEY
+
+    console.log('API key check:', {
+      hasApiKey: !!apiKey,
+      apiKeyLength: apiKey?.length
+    })
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
+        { error: 'OpenAI API key not configured. Please check your environment variables.' },
         { status: 500 }
       )
     }
 
-    // Get language from form data (default to undefined for auto-detection)
-    const language = formData.get('language') as string | null
+
     
     // Create a new FormData with the required model parameter
     const whisperFormData = new FormData()
