@@ -212,27 +212,38 @@ export default function SmartNotesPage() {
       setError('')
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       
-      // Try to use a more compatible audio format
-      let mimeType = 'audio/webm;codecs=opus'
+      // Prioritize Whisper-compatible formats
+      const supportedFormats = [
+        'audio/webm;codecs=opus',  // Best quality, widely supported
+        'audio/webm',               // WebM without codec specification
+        'audio/mp4',                // MP4 audio
+        'audio/wav',                // WAV format
+        'audio/ogg;codecs=opus',   // OGG with Opus codec
+        'audio/ogg',                // OGG format
+        'audio/mpeg',               // MPEG audio
+        'audio/mpga'                // MPEG audio alternative
+      ]
       
-      // Check if the browser supports the preferred format
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        // Fallback to more compatible formats
-        if (MediaRecorder.isTypeSupported('audio/webm')) {
-          mimeType = 'audio/webm'
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4'
-        } else if (MediaRecorder.isTypeSupported('audio/wav')) {
-          mimeType = 'audio/wav'
-        } else {
-          mimeType = '' // Let the browser choose the best format
+      let selectedMimeType = ''
+      
+      // Find the first supported format
+      for (const format of supportedFormats) {
+        if (MediaRecorder.isTypeSupported(format)) {
+          selectedMimeType = format
+          break
         }
       }
       
-      console.log('Using audio format:', mimeType)
+      // If no specific format is supported, let browser choose
+      if (!selectedMimeType) {
+        selectedMimeType = ''
+        console.log('No specific format supported, using browser default')
+      } else {
+        console.log('Selected audio format:', selectedMimeType)
+      }
       
       mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: mimeType || undefined
+        mimeType: selectedMimeType || undefined
       })
       
       audioChunksRef.current = []
@@ -243,7 +254,7 @@ export default function SmartNotesPage() {
       
       mediaRecorderRef.current.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { 
-          type: mimeType || 'audio/webm' 
+          type: selectedMimeType || 'audio/webm' 
         })
         setRecordingBlob(audioBlob)
         setAudioUrl(URL.createObjectURL(audioBlob))
@@ -281,6 +292,24 @@ export default function SmartNotesPage() {
     setError('')
 
     try {
+      // Check if the audio format is Whisper-compatible
+      const isWhisperCompatible = [
+        'audio/flac', 'audio/m4a', 'audio/mp3', 'audio/mp4', 
+        'audio/mpeg', 'audio/mpga', 'audio/oga', 'audio/ogg', 
+        'audio/wav', 'audio/webm'
+      ].some(format => recordingBlob.type.startsWith(format.split('/')[1]))
+
+      console.log('Audio format check:', {
+        currentType: recordingBlob.type,
+        isWhisperCompatible: isWhisperCompatible,
+        size: recordingBlob.size
+      })
+
+      if (!isWhisperCompatible) {
+        console.warn('Audio format may not be compatible with Whisper API:', recordingBlob.type)
+        setError(`Warning: Audio format "${recordingBlob.type}" may not be supported. Trying anyway...`)
+      }
+
       const formData = new FormData()
       formData.append('audio', recordingBlob)
       formData.append('language', language)
