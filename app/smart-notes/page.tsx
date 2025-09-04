@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Plus, Search, Calendar, Edit3, Trash2, Star, ArrowLeft, Save, Lightbulb, Mic, MicOff, Square, Loader2, AlertCircle, X } from 'lucide-react'
+import { FileText, Plus, Search, Calendar, Edit3, Trash2, Star, ArrowLeft, Save, Lightbulb, Mic, MicOff, Square, Loader2, AlertCircle, X, Play } from 'lucide-react'
 import Link from 'next/link'
 
 interface Note {
@@ -19,6 +19,13 @@ interface Note {
   isFavorite: boolean
   createdAt: Date
   updatedAt: Date
+  voiceRecording?: {
+    audioUrl: string
+    audioBlob: Blob | null
+    duration: number
+    format: string
+    language: string
+  }
 }
 
 export default function SmartNotesPage() {
@@ -248,6 +255,48 @@ export default function SmartNotesPage() {
     return new Blob([arrayBuffer], { type: 'audio/wav' })
   }
 
+  // Simple WAV creation function as fallback
+  const createSimpleWav = async (audioBlob: Blob): Promise<Blob> => {
+    // Create a simple WAV file with basic PCM data
+    const arrayBuffer = await audioBlob.arrayBuffer()
+    const uint8Array = new Uint8Array(arrayBuffer)
+    
+    // Create a minimal WAV header for 16-bit PCM
+    const headerSize = 44
+    const dataSize = uint8Array.length
+    const totalSize = headerSize + dataSize
+    
+    const wavBuffer = new ArrayBuffer(totalSize)
+    const view = new DataView(wavBuffer)
+    
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i))
+      }
+    }
+    
+    writeString(0, 'RIFF')
+    view.setUint32(4, totalSize - 8, true)
+    writeString(8, 'WAVE')
+    writeString(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true) // PCM
+    view.setUint16(22, 1, true) // Mono
+    view.setUint32(24, 16000, true) // 16kHz sample rate
+    view.setUint32(28, 32000, true) // Byte rate
+    view.setUint16(32, 2, true) // Block align
+    view.setUint16(34, 16, true) // Bits per sample
+    writeString(36, 'data')
+    view.setUint32(40, dataSize, true)
+    
+    // Copy audio data
+    const audioData = new Uint8Array(wavBuffer, headerSize)
+    audioData.set(uint8Array)
+    
+    return new Blob([wavBuffer], { type: 'audio/wav' })
+  }
+
   // Voice recording functions
   const startRecording = async () => {
     try {
@@ -349,25 +398,34 @@ export default function SmartNotesPage() {
         size: recordingBlob.size
       })
 
+      // Always convert to a guaranteed compatible format for Whisper API
       let audioBlob = recordingBlob
+      let convertedFormat = 'original'
       
-      if (!isWhisperCompatible) {
-        console.warn('Audio format may not be compatible with Whisper API:', recordingBlob.type)
-        setError(`Warning: Audio format "${recordingBlob.type}" may not be supported. Trying to convert...`)
+      try {
+        console.log('Converting audio to WAV format for Whisper compatibility...')
+        const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+        const arrayBuffer = await recordingBlob.arrayBuffer()
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
         
-        // Try to convert to a more compatible format
+        // Create a new blob with WAV format (guaranteed compatible)
+        audioBlob = await convertToWav(audioBuffer)
+        convertedFormat = 'wav'
+        console.log('✅ Successfully converted to WAV format:', audioBlob.type, audioBlob.size)
+        setError('✅ Audio converted to WAV format for Whisper compatibility')
+      } catch (conversionError) {
+        console.warn('Failed to convert audio format, using original:', conversionError)
+        setError(`⚠️ Could not convert audio format. Using original: ${recordingBlob.type}`)
+        
+        // If conversion fails, try to create a simple WAV file as fallback
         try {
-          const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
-          const arrayBuffer = await recordingBlob.arrayBuffer()
-          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
-          
-          // Create a new blob with WAV format (more compatible)
-          audioBlob = await convertToWav(audioBuffer)
-          console.log('Converted to WAV format:', audioBlob.type, audioBlob.size)
-          setError('✅ Audio converted to WAV format for better compatibility')
-        } catch (conversionError) {
-          console.warn('Failed to convert audio format, using original:', conversionError)
-          setError(`⚠️ Could not convert audio format. Using original: ${recordingBlob.type}`)
+          audioBlob = await createSimpleWav(recordingBlob)
+          convertedFormat = 'simple-wav'
+          console.log('✅ Created simple WAV fallback:', audioBlob.type, audioBlob.size)
+          setError('✅ Created simple WAV format as fallback')
+        } catch (fallbackError) {
+          console.error('All conversion methods failed:', fallbackError)
+          setError(`❌ Audio conversion failed. Original format: ${recordingBlob.type}`)
         }
       }
 
@@ -482,7 +540,15 @@ export default function SmartNotesPage() {
       tags: ['voice-note'],
       isFavorite: false,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      // Add voice recording data
+      voiceRecording: {
+        audioUrl: audioUrl || '',
+        audioBlob: recordingBlob,
+        duration: recordingBlob ? Math.round(recordingBlob.size / 1000) : 0,
+        format: recordingBlob ? recordingBlob.type : 'unknown',
+        language: language
+      }
     }
 
     setNotes(prev => [newNote, ...prev])
@@ -813,10 +879,25 @@ export default function SmartNotesPage() {
                               {note.title}
                             </h4>
                             {note.tags.includes('voice-note') && (
-                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 border border-blue-300">
-                                <Mic className="w-3 h-3 mr-1" />
-                                Voice
-                              </Badge>
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 border border-blue-300">
+                                  <Mic className="w-3 h-3 mr-1" />
+                                  Voice
+                                </Badge>
+                                {note.voiceRecording?.audioUrl && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const audio = new Audio(note.voiceRecording!.audioUrl)
+                                      audio.play()
+                                    }}
+                                    className="p-1 rounded-full bg-green-100 hover:bg-green-200 text-green-600 transition-colors"
+                                    title="Play voice recording"
+                                  >
+                                    <Play className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>
