@@ -206,6 +206,48 @@ export default function SmartNotesPage() {
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   })
 
+  // Audio conversion function
+  const convertToWav = async (audioBuffer: AudioBuffer): Promise<Blob> => {
+    const length = audioBuffer.length
+    const numberOfChannels = audioBuffer.numberOfChannels
+    const sampleRate = audioBuffer.sampleRate
+    const arrayBuffer = new ArrayBuffer(44 + length * numberOfChannels * 2)
+    const view = new DataView(arrayBuffer)
+    
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i))
+      }
+    }
+    
+    writeString(0, 'RIFF')
+    view.setUint32(4, 36 + length * numberOfChannels * 2, true)
+    writeString(8, 'WAVE')
+    writeString(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, numberOfChannels, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * numberOfChannels * 2, true)
+    view.setUint16(32, numberOfChannels * 2, true)
+    view.setUint16(34, 16, true)
+    writeString(36, 'data')
+    view.setUint32(40, length * numberOfChannels * 2, true)
+    
+    // Convert audio data
+    let offset = 44
+    for (let i = 0; i < length; i++) {
+      for (let channel = 0; channel < numberOfChannels; channel++) {
+        const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(channel)[i]))
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
+        offset += 2
+      }
+    }
+    
+    return new Blob([arrayBuffer], { type: 'audio/wav' })
+  }
+
   // Voice recording functions
   const startRecording = async () => {
     try {
@@ -293,25 +335,44 @@ export default function SmartNotesPage() {
 
     try {
       // Check if the audio format is Whisper-compatible
-      const isWhisperCompatible = [
-        'audio/flac', 'audio/m4a', 'audio/mp3', 'audio/mp4', 
-        'audio/mpeg', 'audio/mpga', 'audio/oga', 'audio/ogg', 
-        'audio/wav', 'audio/webm'
-      ].some(format => recordingBlob.type.startsWith(format.split('/')[1]))
+      const whisperFormats = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
+      const currentFormat = recordingBlob.type.toLowerCase()
+      const isWhisperCompatible = whisperFormats.some(format => 
+        currentFormat.includes(format) || currentFormat.includes(`audio/${format}`)
+      )
 
       console.log('Audio format check:', {
         currentType: recordingBlob.type,
+        currentFormatLower: currentFormat,
+        whisperFormats: whisperFormats,
         isWhisperCompatible: isWhisperCompatible,
         size: recordingBlob.size
       })
 
+      let audioBlob = recordingBlob
+      
       if (!isWhisperCompatible) {
         console.warn('Audio format may not be compatible with Whisper API:', recordingBlob.type)
-        setError(`Warning: Audio format "${recordingBlob.type}" may not be supported. Trying anyway...`)
+        setError(`Warning: Audio format "${recordingBlob.type}" may not be supported. Trying to convert...`)
+        
+        // Try to convert to a more compatible format
+        try {
+          const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+          const arrayBuffer = await recordingBlob.arrayBuffer()
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+          
+          // Create a new blob with WAV format (more compatible)
+          audioBlob = await convertToWav(audioBuffer)
+          console.log('Converted to WAV format:', audioBlob.type, audioBlob.size)
+          setError('✅ Audio converted to WAV format for better compatibility')
+        } catch (conversionError) {
+          console.warn('Failed to convert audio format, using original:', conversionError)
+          setError(`⚠️ Could not convert audio format. Using original: ${recordingBlob.type}`)
+        }
       }
 
       const formData = new FormData()
-      formData.append('audio', recordingBlob)
+      formData.append('audio', audioBlob)
       formData.append('language', language)
 
       console.log('Sending transcription request:', {
@@ -345,9 +406,21 @@ export default function SmartNotesPage() {
         
         try {
           const errorData = await response.json()
-          errorMessage = errorData.error || errorMessage
+          console.error('Raw API Error response:', errorData)
+          
+          // Extract error message from OpenAI API response
+          if (errorData.error && errorData.error.message) {
+            errorMessage = errorData.error.message
+          } else if (errorData.error) {
+            errorMessage = errorData.error
+          } else if (typeof errorData === 'string') {
+            errorMessage = errorData
+          } else {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`
+          }
+          
           errorDetails = errorData
-          console.error('API Error details:', errorData)
+          console.error('Processed API Error details:', errorDetails)
         } catch (parseError) {
           console.error('Failed to parse error response:', parseError)
           errorMessage = `HTTP ${response.status}: ${response.statusText}`
@@ -357,7 +430,8 @@ export default function SmartNotesPage() {
           status: response.status,
           statusText: response.statusText,
           headers: Object.fromEntries(response.headers.entries()),
-          errorDetails: errorDetails
+          errorDetails: errorDetails,
+          parsedErrorMessage: errorMessage
         })
         
         throw new Error(errorMessage)
