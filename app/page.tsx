@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { SignIn, SignUp, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Sparkles, Mic, ImageIcon, FileText, Bot, Star, Heart, Zap, Upload } from 'lucide-react'
+import { Sparkles, Mic, ImageIcon, FileText, Bot, Star, Heart, Zap, Upload, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 
 export default function HomePage() {
@@ -92,9 +92,9 @@ export default function HomePage() {
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-8">
               Join our magical AI-powered playground where creativity knows no bounds! 
-              Create stunning artwork, transform voice to text, and explore endless possibilities.
+              Create stunning artwork, transform voice to text, search amazing GIFs, and explore endless possibilities.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-12">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto mb-12">
               <div className="text-center p-4">
                 <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-3">
                   <ImageIcon className="w-6 h-6 text-white" />
@@ -115,6 +115,13 @@ export default function HomePage() {
                 </div>
                 <h3 className="font-semibold text-gray-800">AI Buddy</h3>
                 <p className="text-sm text-gray-600">Your creative companion</p>
+              </div>
+              <div className="text-center p-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <TrendingUp className="w-6 h-6 text-white" />
+                </div>
+                <h3 className="font-semibold text-gray-800">Tenor GIFs</h3>
+                <p className="text-sm text-gray-600">Search amazing GIFs</p>
               </div>
             </div>
             
@@ -170,7 +177,7 @@ export default function HomePage() {
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
               Explore the magic of AI-powered creativity with our suite of innovative tools. 
-              From generating stunning artwork to transcribing voice notes, everything you need is here!
+              From generating stunning artwork to transcribing voice notes, searching GIFs, and more - everything you need is here!
             </p>
           </div>
 
@@ -259,6 +266,28 @@ export default function HomePage() {
                     className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white"
                   >
                     Chat Now
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Tenor GIFs */}
+            <Card className="group hover:shadow-xl transition-all duration-300 border-0 bg-white/80 backdrop-blur-sm hover:bg-white/90">
+              <CardHeader className="text-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <TrendingUp className="w-6 h-6 text-white" />
+                </div>
+                <CardTitle className="text-xl text-gray-800">Tenor GIFs</CardTitle>
+                <CardDescription className="text-gray-600">
+                  Search and copy amazing GIFs from Tenor
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/tenor-gifs" className="w-full">
+                  <Button
+                    className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white"
+                  >
+                    Search GIFs
                   </Button>
                 </Link>
               </CardContent>
